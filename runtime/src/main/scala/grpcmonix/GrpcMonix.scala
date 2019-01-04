@@ -6,7 +6,7 @@ import monix.eval.{Callback, Task}
 import monix.execution.Ack.{Continue, Stop}
 import monix.execution.{Ack, Scheduler}
 import monix.reactive.Observable
-import monix.reactive.observables.ObservableLike.{Operator, Transformer}
+import monix.reactive.Observable.Operator
 import monix.reactive.observers.Subscriber
 import monix.reactive.subjects.PublishSubject
 import org.reactivestreams.{Subscriber => SubscriberR}
@@ -17,6 +17,7 @@ import scala.concurrent.Future
 object GrpcMonix {
 
   type GrpcOperator[I, O] = StreamObserver[O] => StreamObserver[I]
+  type Transformer[I, O] = Observable[I] => Observable[O]
 
   def guavaFutureToMonixTask[T](future: ListenableFuture[T]): Task[T] =
     Task.deferFuture {
@@ -24,10 +25,10 @@ object GrpcMonix {
     }
 
   def grpcOperatorToMonixOperator[I,O](grpcOperator: GrpcOperator[I,O]): Operator[I,O] = {
-    outputSubsriber: Subscriber[O] =>
-      val outputObserver: StreamObserver[O] = monixSubscriberToGrpcObserver(outputSubsriber)
+    outputSubscriber: Subscriber[O] =>
+      val outputObserver: StreamObserver[O] = monixSubscriberToGrpcObserver(outputSubscriber)
       val inputObserver: StreamObserver[I] = grpcOperator(outputObserver)
-      grpcObserverToMonixSubscriber(inputObserver, outputSubsriber.scheduler)
+      grpcObserverToMonixSubscriber(inputObserver, outputSubscriber.scheduler)
   }
 
   def monixSubscriberToGrpcObserver[T](subscriber: Subscriber[T]): StreamObserver[T] =
@@ -77,7 +78,7 @@ object GrpcMonix {
   def unliftByTransformer[I, O](transformer: Transformer[I, O], subscriber: Subscriber[O]): Subscriber[I] =
     new Subscriber[I] {
       private[this] val subject = PublishSubject[I]()
-      subject.transform(transformer).subscribe(subscriber)
+      transformer(subject).subscribe(subscriber)
 
       override implicit def scheduler: Scheduler = subscriber.scheduler
       override def onError(t: Throwable): Unit = subject.onError(t)
